@@ -198,6 +198,18 @@ class Storage:
         d = json.loads(decrypt_if_encrypted(row["auth_json"]))
         return AccountAuth(**d)
 
+    def update_account_auth(self, account_id: int, auth: AccountAuth) -> None:
+        """Update auth credentials for an existing account."""
+        row = self._conn.execute("SELECT id FROM accounts WHERE id=?", (account_id,)).fetchone()
+        if not row:
+            raise KeyError(f"account {account_id} not found")
+        auth_json = encrypt_if_configured(json.dumps(asdict(auth)))
+        self._conn.execute(
+            "UPDATE accounts SET auth_json=? WHERE id=?",
+            (auth_json, account_id),
+        )
+        self._conn.commit()
+
     def get_account_proxy(self, account_id: int) -> Optional[ProxyConfig]:
         row = self._conn.execute("SELECT proxy_json FROM accounts WHERE id=?", (account_id,)).fetchone()
         if not row:

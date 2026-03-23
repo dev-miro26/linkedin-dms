@@ -106,21 +106,6 @@ def create_account(body: AccountCreateIn):
     return {"account_id": account_id}
 
 
-@app.post("/accounts/refresh")
-def refresh_account(body: AccountRefreshIn):
-    """Update session cookies for an existing account without recreating it."""
-    try:
-        auth = body.to_account_auth()
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=redact_string(str(exc)))
-    try:
-        storage.update_account_auth(body.account_id, auth)
-    except KeyError as e:
-        raise HTTPException(status_code=404, detail=redact_string(str(e))) from e
-    logger.info("Account refreshed: %s", redact_for_log({"account_id": body.account_id}))
-    return {"ok": True, "account_id": body.account_id}
-
-
 @app.get("/auth/check", response_model=AuthCheckResponse)
 def auth_check(account_id: int):
     try:

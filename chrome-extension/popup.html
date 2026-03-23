@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=380">
+  <title>Desearch LinkedIn DMs</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 380px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 13px;
+      color: #1d1d1f;
+      background: #fafafa;
+      padding: 16px;
+    }
+    h1 {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    h1 .logo { font-size: 20px; }
+    .section {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 12px;
+    }
+    .section-title {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      color: #666;
+      margin-bottom: 8px;
+      letter-spacing: 0.5px;
+    }
+    label {
+      display: block;
+      font-size: 12px;
+      color: #555;
+      margin-bottom: 4px;
+    }
+    input[type="text"] {
+      width: 100%;
+      padding: 7px 10px;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+      font-size: 13px;
+      margin-bottom: 8px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    input[type="text"]:focus { border-color: #0a66c2; }
+    button {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 5px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .btn-primary {
+      background: #0a66c2;
+      color: #fff;
+      width: 100%;
+    }
+    .btn-primary:hover { background: #004182; }
+    .btn-primary:disabled { background: #a0c4e8; cursor: not-allowed; }
+    .btn-secondary {
+      background: #e8e8e8;
+      color: #333;
+      width: 100%;
+      margin-top: 6px;
+    }
+    .btn-secondary:hover { background: #d0d0d0; }
+    .btn-secondary:disabled { background: #eee; color: #999; cursor: not-allowed; }
+    .status-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 4px 0;
+      font-size: 12px;
+    }
+    .status-row .label { color: #666; }
+    .status-row .value { font-weight: 500; color: #1d1d1f; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .badge-ok { background: #dcfce7; color: #166534; }
+    .badge-warn { background: #fef9c3; color: #854d0e; }
+    .badge-error { background: #fee2e2; color: #991b1b; }
+    .badge-idle { background: #e0e7ff; color: #3730a3; }
+    #message {
+      margin-top: 8px;
+      padding: 8px;
+      border-radius: 5px;
+      font-size: 12px;
+      display: none;
+    }
+    #message.success { display: block; background: #dcfce7; color: #166534; }
+    #message.error { display: block; background: #fee2e2; color: #991b1b; }
+    .meta {
+      font-size: 11px;
+      color: #888;
+      margin-top: 6px;
+    }
+  </style>
+</head>
+<body>
+  <h1><span class="logo">🔗</span> Desearch LinkedIn DMs</h1>
+
+  <!-- Status section -->
+  <div class="section">
+    <div class="section-title">Status</div>
+    <div class="status-row">
+      <span class="label">Account</span>
+      <span class="value" id="accountDisplay">Not registered</span>
+    </div>
+    <div class="status-row">
+      <span class="label">Status</span>
+      <span id="statusBadge"><span class="badge badge-idle">idle</span></span>
+    </div>
+    <div class="status-row">
+      <span class="label">Headers captured</span>
+      <span class="value" id="headersDisplay">—</span>
+    </div>
+    <div class="meta" id="lastUpdated"></div>
+  </div>
+
+  <!-- Config section -->
+  <div class="section">
+    <div class="section-title">Configuration</div>
+    <label for="serviceUrl">Service URL</label>
+    <input type="text" id="serviceUrl" placeholder="http://localhost:8899">
+    <button class="btn-secondary" id="saveUrlBtn">Save URL</button>
+  </div>
+
+  <!-- Registration section -->
+  <div class="section" id="registerSection">
+    <div class="section-title">Register Account</div>
+    <label for="accountLabel">Account label</label>
+    <input type="text" id="accountLabel" placeholder="e.g. sales-1">
+    <button class="btn-primary" id="registerBtn">Register Account</button>
+  </div>
+
+  <!-- Actions section (shown after registration) -->
+  <div class="section" id="actionsSection" style="display: none;">
+    <div class="section-title">Actions</div>
+    <button class="btn-primary" id="syncBtn">Sync Now</button>
+    <button class="btn-secondary" id="authCheckBtn">Check Auth</button>
+  </div>
+
+  <div id="message"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
