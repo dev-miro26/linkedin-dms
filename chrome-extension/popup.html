@@ -22,7 +22,13 @@
       align-items: center;
       gap: 6px;
     }
-    h1 .logo { font-size: 20px; }
+    h1 .logo {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      object-fit: cover;
+      flex-shrink: 0;
+    }
     .section {
       background: #fff;
       border: 1px solid #e0e0e0;
@@ -116,7 +122,7 @@
   </style>
 </head>
 <body>
-  <h1><span class="logo">🔗</span> Desearch LinkedIn DMs</h1>
+  <h1><img class="logo" src="icons/icon48.png" width="22" height="22" alt=""> Desearch LinkedIn DMs</h1>
 
   <div class="section">
     <div class="section-title">Status</div>
