@@ -31,6 +31,13 @@ SAMPLE_AUTH_NO_JSESSIONID = AccountAuth(
     jsessionid=None,
 )
 
+SAMPLE_AUTH_BRIDGE = AccountAuth(
+    li_at="AQEFARIBAAAAAAefghij-SAMPLE-TOKEN-NOT-REAL",
+    jsessionid="ajax:9876543210987654321",
+    x_li_track='{"browser":"captured"}',
+    csrf_token="ajax:csrf-from-extension",
+)
+
 SAMPLE_PROXY = ProxyConfig(url="http://user:pass@residential.proxy.io:8080")
 
 SAMPLE_RECIPIENT = "urn:li:fsd_profile:ACoAADI4RK0BxNdiSomeProfileId"
@@ -150,6 +157,9 @@ class TestSendMessageRequestShape:
 
         headers = kwargs["headers"]
         assert headers["csrf-token"] == "ajax:9876543210987654321"
+        assert headers["x-li-track"] == (
+            '{"clientVersion":"1.13.8953","osName":"web","timezoneOffset":4,"deviceFormFactor":"DESKTOP"}'
+        )
         assert headers["Content-Type"] == "application/json"
         assert headers["x-restli-method"] == "CREATE"
         assert headers["x-restli-protocol-version"] == "2.0.0"
@@ -198,6 +208,22 @@ class TestSendMessageRequestShape:
         assert "JSESSIONID" not in cookies
         headers = client.post.call_args.kwargs["headers"]
         assert headers["csrf-token"] == ""
+
+    @patch("libs.providers.linkedin.provider.time")
+    @patch("libs.providers.linkedin.provider.httpx.Client")
+    def test_uses_bridge_headers_when_set(self, MockClient, mock_time):
+        mock_time.monotonic.return_value = 1000.0
+        client = MagicMock()
+        MockClient.return_value.__enter__ = MagicMock(return_value=client)
+        MockClient.return_value.__exit__ = MagicMock(return_value=False)
+        client.post.return_value = _make_mock_response(200)
+
+        provider = _make_provider(auth=SAMPLE_AUTH_BRIDGE)
+        provider.send_message(recipient=SAMPLE_RECIPIENT, text="Hi")
+
+        headers = client.post.call_args.kwargs["headers"]
+        assert headers["x-li-track"] == '{"browser":"captured"}'
+        assert headers["csrf-token"] == "ajax:csrf-from-extension"
 
 
 # ---------------------------------------------------------------------------

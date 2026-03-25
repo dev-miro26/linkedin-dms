@@ -28,10 +28,19 @@ class AuthCheckResponse(BaseModel):
     error: Optional[str] = None
 
 
+class IdentityOut(BaseModel):
+    status: str
+    public_identifier: Optional[str] = None
+    member_id: Optional[str] = None
+    error: Optional[str] = None
+
+
 class AccountCreateIn(BaseModel):
     label: str = Field(..., description="Human label, e.g. 'sales-1'")
     li_at: str | None = Field(None, description="LinkedIn li_at cookie value (required if cookies not provided)")
     jsessionid: str | None = Field(None, description="Optional JSESSIONID cookie value")
+    x_li_track: str | None = Field(None, description="Optional x-li-track header from the browser session")
+    csrf_token: str | None = Field(None, description="Optional csrf-token header (overrides JSESSIONID for API headers when set)")
     cookies: str | None = Field(
         None,
         description="Cookie header string, e.g. 'li_at=xxx; JSESSIONID=yyy'. Overrides li_at/jsessionid fields.",
@@ -47,13 +56,20 @@ class AccountCreateIn(BaseModel):
     def to_account_auth(self) -> AccountAuth:
         if self.cookies:
             return cookies_to_account_auth(self.cookies)
-        return AccountAuth(li_at=validate_li_at(self.li_at or ""), jsessionid=self.jsessionid)
+        return AccountAuth(
+            li_at=validate_li_at(self.li_at or ""),
+            jsessionid=self.jsessionid,
+            x_li_track=self.x_li_track,
+            csrf_token=self.csrf_token,
+        )
 
 
 class AccountRefreshIn(BaseModel):
     account_id: int
     li_at: str | None = Field(None, description="LinkedIn li_at cookie value (required if cookies not provided)")
     jsessionid: str | None = Field(None, description="Optional JSESSIONID cookie value")
+    x_li_track: str | None = Field(None, description="Updated x-li-track header (omit to keep stored value)")
+    csrf_token: str | None = Field(None, description="Updated csrf-token header (omit to keep stored value)")
     cookies: str | None = Field(
         None,
         description="Cookie header string, e.g. 'li_at=xxx; JSESSIONID=yyy'. Overrides li_at/jsessionid fields.",
@@ -64,11 +80,6 @@ class AccountRefreshIn(BaseModel):
         if not self.cookies and not self.li_at:
             raise ValueError("Provide either 'cookies' string or 'li_at' field")
         return self
-
-    def to_account_auth(self) -> AccountAuth:
-        if self.cookies:
-            return cookies_to_account_auth(self.cookies)
-        return AccountAuth(li_at=validate_li_at(self.li_at or ""), jsessionid=self.jsessionid)
 
 
 class SendIn(BaseModel):
@@ -104,6 +115,66 @@ def create_account(body: AccountCreateIn):
     account_id = storage.create_account(label=body.label, auth=auth, proxy=proxy)
     logger.info("Account created: %s", redact_for_log({"account_id": account_id, "label": body.label}))
     return {"account_id": account_id}
+
+
+@app.post("/accounts/refresh")
+def refresh_account(body: AccountRefreshIn):
+    try:
+        existing = storage.get_account_auth(body.account_id)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=redact_string(str(e))) from e
+    try:
+        if body.cookies:
+            parsed = cookies_to_account_auth(body.cookies)
+            jsession = body.jsessionid if body.jsessionid is not None else parsed.jsessionid
+            if jsession is None:
+                jsession = existing.jsessionid
+            x_track = body.x_li_track if body.x_li_track is not None else existing.x_li_track
+            csrf = body.csrf_token if body.csrf_token is not None else existing.csrf_token
+            auth = AccountAuth(
+                li_at=parsed.li_at,
+                jsessionid=jsession,
+                x_li_track=x_track,
+                csrf_token=csrf,
+            )
+        else:
+            jsession = body.jsessionid if body.jsessionid is not None else existing.jsessionid
+            x_track = body.x_li_track if body.x_li_track is not None else existing.x_li_track
+            csrf = body.csrf_token if body.csrf_token is not None else existing.csrf_token
+            auth = AccountAuth(
+                li_at=validate_li_at(body.li_at or ""),
+                jsessionid=jsession,
+                x_li_track=x_track,
+                csrf_token=csrf,
+            )
+        storage.update_account_auth(body.account_id, auth)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=redact_string(str(exc))) from exc
+    logger.info("Account refreshed: %s", redact_for_log({"account_id": body.account_id}))
+    return {"ok": True, "account_id": body.account_id}
+
+
+@app.get("/auth/identity", response_model=IdentityOut)
+def auth_identity(account_id: int):
+    try:
+        auth = storage.get_account_auth(account_id)
+        proxy = storage.get_account_proxy(account_id)
+    except KeyError:
+        return IdentityOut(status="failed", error="account not found")
+
+    provider = LinkedInProvider(auth=auth, proxy=proxy)
+    try:
+        ident = provider.fetch_identity()
+    except PermissionError as exc:
+        return IdentityOut(status="failed", error=str(exc))
+    except RuntimeError as exc:
+        return IdentityOut(status="failed", error=str(exc))
+
+    return IdentityOut(
+        status="ok",
+        public_identifier=ident.public_identifier,
+        member_id=ident.member_id,
+    )
 
 
 @app.get("/auth/check", response_model=AuthCheckResponse)

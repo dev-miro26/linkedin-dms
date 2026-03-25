@@ -118,12 +118,11 @@
 <body>
   <h1><span class="logo">🔗</span> Desearch LinkedIn DMs</h1>
 
-  <!-- Status section -->
   <div class="section">
     <div class="section-title">Status</div>
     <div class="status-row">
-      <span class="label">Account</span>
-      <span class="value" id="accountDisplay">Not registered</span>
+      <span class="label">LinkedIn account</span>
+      <span class="value" id="linkedinAccountDisplay">—</span>
     </div>
     <div class="status-row">
       <span class="label">Status</span>
@@ -133,10 +132,10 @@
       <span class="label">Headers captured</span>
       <span class="value" id="headersDisplay">—</span>
     </div>
+    <div class="meta" id="registerHint" style="display: none;"></div>
     <div class="meta" id="lastUpdated"></div>
   </div>
 
-  <!-- Config section -->
   <div class="section">
     <div class="section-title">Configuration</div>
     <label for="serviceUrl">Service URL</label>
@@ -144,15 +143,6 @@
     <button class="btn-secondary" id="saveUrlBtn">Save URL</button>
   </div>
 
-  <!-- Registration section -->
-  <div class="section" id="registerSection">
-    <div class="section-title">Register Account</div>
-    <label for="accountLabel">Account label</label>
-    <input type="text" id="accountLabel" placeholder="e.g. sales-1">
-    <button class="btn-primary" id="registerBtn">Register Account</button>
-  </div>
-
-  <!-- Actions section (shown after registration) -->
   <div class="section" id="actionsSection" style="display: none;">
     <div class="section-title">Actions</div>
     <button class="btn-primary" id="syncBtn">Sync Now</button>

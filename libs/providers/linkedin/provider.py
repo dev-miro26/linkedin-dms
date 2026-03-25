@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 import uuid
 from dataclasses import dataclass
@@ -19,6 +20,9 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _MESSAGING_URL = "https://www.linkedin.com/voyager/api/messaging/conversations"
+_ME_URL = "https://www.linkedin.com/voyager/api/me"
+
+_MEMBER_URN_RE = re.compile(r"urn:li:member:(\d+)")
 
 _BASE_HEADERS = {
     "User-Agent": (
@@ -88,6 +92,36 @@ class LinkedInMessage:
 class AuthCheckResult:
     ok: bool
     error: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class LinkedInIdentity:
+    public_identifier: Optional[str] = None
+    member_id: Optional[str] = None
+
+
+def _parse_me_json_for_identity(data: Any) -> LinkedInIdentity:
+    public_id: Optional[str] = None
+    member_id: Optional[str] = None
+
+    def walk(obj: Any) -> None:
+        nonlocal public_id, member_id
+        if isinstance(obj, dict):
+            pid = obj.get("publicIdentifier")
+            if isinstance(pid, str) and pid.strip():
+                public_id = public_id or pid.strip()
+            for v in obj.values():
+                walk(v)
+        elif isinstance(obj, list):
+            for item in obj:
+                walk(item)
+        elif isinstance(obj, str):
+            m = _MEMBER_URN_RE.search(obj)
+            if m:
+                member_id = member_id or m.group(1)
+
+    walk(data)
+    return LinkedInIdentity(public_identifier=public_id, member_id=member_id)
 
 
 def _extract_message_id(data: dict[str, Any]) -> str:
@@ -341,8 +375,19 @@ class LinkedInProvider:
     # ------------------------------------------------------------------
 
     def _build_headers(self) -> dict[str, str]:
-        csrf_token = self.auth.jsessionid or ""
-        return {**_BASE_HEADERS, "csrf-token": csrf_token}
+        track = self.auth.x_li_track or _BASE_HEADERS["x-li-track"]
+        if self.auth.csrf_token is not None:
+            csrf = self.auth.csrf_token
+        else:
+            csrf = self.auth.jsessionid or ""
+        return {**_BASE_HEADERS, "x-li-track": track, "csrf-token": csrf}
+
+    def _build_identity_headers(self) -> dict[str, str]:
+        h = {**self._build_headers()}
+        h["Referer"] = "https://www.linkedin.com/feed/"
+        h["Origin"] = "https://www.linkedin.com"
+        h["x-li-page-instance"] = "urn:li:page:d_flagship3_feed"
+        return h
 
     def _get_cookies(self) -> dict[str, str]:
         cookies: dict[str, str] = {"li_at": self.auth.li_at}
@@ -798,6 +843,33 @@ class LinkedInProvider:
                 self._sent_keys[idempotency_key] = platform_message_id
 
             return platform_message_id
+
+    def fetch_identity(self) -> LinkedInIdentity:
+        if not self.auth.li_at or not self.auth.li_at.strip():
+            raise PermissionError("missing li_at cookie")
+
+        try:
+            with httpx.Client(
+                proxy=self._proxy_url(),
+                timeout=30.0,
+                follow_redirects=True,
+            ) as client:
+                resp = client.get(
+                    _ME_URL,
+                    headers=self._build_identity_headers(),
+                    cookies=self._get_cookies(),
+                )
+        except httpx.HTTPError as exc:
+            raise RuntimeError(f"LinkedIn identity request failed ({exc})") from exc
+
+        if resp.status_code == 401:
+            raise PermissionError("LinkedIn session expired (HTTP 401). Re-authenticate.")
+        if resp.status_code == 403:
+            raise PermissionError("LinkedIn rejected the request (HTTP 403).")
+        if resp.status_code != 200:
+            raise RuntimeError(f"LinkedIn identity request failed (HTTP {resp.status_code})")
+
+        return _parse_me_json_for_identity(resp.json())
 
     def check_auth(self) -> AuthCheckResult:
         """Perform a lightweight auth sanity check.

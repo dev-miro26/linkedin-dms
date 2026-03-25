@@ -35,6 +35,8 @@ class AccountAuth:
 
     li_at: str
     jsessionid: Optional[str] = None
+    x_li_track: Optional[str] = None
+    csrf_token: Optional[str] = None
 
     def __repr__(self) -> str:
         return "AccountAuth(li_at='[REDACTED]', jsessionid='[REDACTED]')"

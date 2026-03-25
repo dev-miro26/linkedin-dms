@@ -2,15 +2,13 @@
 
 const $ = (sel) => document.querySelector(sel);
 
-const accountDisplay = $("#accountDisplay");
+const linkedinAccountDisplay = $("#linkedinAccountDisplay");
 const statusBadge = $("#statusBadge");
 const headersDisplay = $("#headersDisplay");
 const lastUpdated = $("#lastUpdated");
 const serviceUrlInput = $("#serviceUrl");
 const saveUrlBtn = $("#saveUrlBtn");
-const accountLabel = $("#accountLabel");
-const registerBtn = $("#registerBtn");
-const registerSection = $("#registerSection");
+const registerHint = $("#registerHint");
 const actionsSection = $("#actionsSection");
 const syncBtn = $("#syncBtn");
 const authCheckBtn = $("#authCheckBtn");
@@ -31,8 +29,10 @@ function statusToBadge(status) {
   const map = {
     registered: ["registered", "ok"],
     cookies_refreshed: ["cookies refreshed", "ok"],
+    headers_synced: ["headers synced", "ok"],
     synced: ["synced", "ok"],
     no_account: ["no account", "warn"],
+    auto_register_failed: ["auto-register failed", "error"],
     refresh_network_error: ["network error", "error"],
   };
   if (map[status]) {
@@ -51,40 +51,57 @@ function sendMessage(msg) {
   });
 }
 
-// ─── Load current state ─────────────────────────────────────────────
-async function loadStatus() {
-  const resp = await sendMessage({ action: "getStatus" });
-  if (!resp?.ok) return;
-  const d = resp.data;
+function formatLinkedInAccountLine(d) {
+  if (!d.accountId) return "—";
+  const pub = d.linkedinPublicId;
+  const mid = d.linkedinMemberId;
+  if (pub && mid) return `@${pub} · ${mid}`;
+  if (pub) return `@${pub}`;
+  if (mid) return String(mid);
+  return "—";
+}
 
-  // Service URL
+function applyStatusPayload(d) {
   serviceUrlInput.value = d.serviceUrl || "";
   serviceUrlInput.placeholder = "http://localhost:8899";
 
-  // Account
   if (d.accountId) {
-    accountDisplay.textContent = `#${d.accountId}` + (d.accountLabel ? ` (${d.accountLabel})` : "");
-    registerSection.style.display = "none";
+    linkedinAccountDisplay.textContent = formatLinkedInAccountLine(d);
     actionsSection.style.display = "block";
+    registerHint.style.display = "none";
   } else {
-    accountDisplay.textContent = "Not registered";
-    registerSection.style.display = "block";
+    linkedinAccountDisplay.textContent = "—";
     actionsSection.style.display = "none";
+    registerHint.textContent =
+      "Sign in to LinkedIn in this browser. The extension registers with your service automatically when you are logged in.";
+    registerHint.style.display = "block";
   }
 
-  // Status badge
   statusBadge.innerHTML = statusToBadge(d.lastStatus);
 
-  // Captured headers
   const parts = [];
   if (d.xLiTrack) parts.push("x-li-track");
   if (d.csrfToken) parts.push("csrf-token");
   headersDisplay.textContent = parts.length > 0 ? parts.join(", ") : "—";
 
-  // Last updated
   if (d.lastStatusAt) {
     const dt = new Date(d.lastStatusAt);
     lastUpdated.textContent = `Last updated: ${dt.toLocaleTimeString()}`;
+  }
+}
+
+async function loadStatus() {
+  await sendMessage({ action: "ensureRegistered" });
+  const resp = await sendMessage({ action: "getStatus" });
+  if (!resp?.ok) return;
+  const d = resp.data;
+  applyStatusPayload(d);
+
+  if (!d.accountId) return;
+
+  const idResp = await sendMessage({ action: "fetchIdentity" });
+  if (idResp?.ok && idResp.data) {
+    applyStatusPayload({ ...d, ...idResp.data });
   }
 }
 
@@ -106,29 +123,6 @@ saveUrlBtn.addEventListener("click", async () => {
     showMessage("Service URL saved.", "success");
   } else {
     showMessage(resp?.error || "Failed to save URL.", "error");
-  }
-});
-
-// ─── Register account ───────────────────────────────────────────────
-registerBtn.addEventListener("click", async () => {
-  const label = accountLabel.value.trim();
-  if (!label) {
-    showMessage("Please enter an account label.", "error");
-    return;
-  }
-  registerBtn.disabled = true;
-  registerBtn.textContent = "Registering...";
-
-  const resp = await sendMessage({ action: "register", label });
-
-  registerBtn.disabled = false;
-  registerBtn.textContent = "Register Account";
-
-  if (resp?.ok) {
-    showMessage(`Account registered (ID: ${resp.data.accountId})`, "success");
-    await loadStatus();
-  } else {
-    showMessage(resp?.error || "Registration failed.", "error");
   }
 });
 
