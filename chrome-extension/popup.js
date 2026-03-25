@@ -1,8 +1,8 @@
-/* Desearch LinkedIn DMs — Popup UI Logic */
-
 const $ = (sel) => document.querySelector(sel);
 
 const linkedinAccountDisplay = $("#linkedinAccountDisplay");
+const serviceAccountDisplay = $("#serviceAccountDisplay");
+const lastSyncDisplay = $("#lastSyncDisplay");
 const statusBadge = $("#statusBadge");
 const headersDisplay = $("#headersDisplay");
 const lastUpdated = $("#lastUpdated");
@@ -14,10 +14,9 @@ const syncBtn = $("#syncBtn");
 const authCheckBtn = $("#authCheckBtn");
 const messageEl = $("#message");
 
-// ─── Helpers ────────────────────────────────────────────────────────
 function showMessage(text, type) {
   messageEl.textContent = text;
-  messageEl.className = type; // "success" or "error"
+  messageEl.className = type;
   setTimeout(() => {
     messageEl.className = "";
     messageEl.textContent = "";
@@ -67,14 +66,28 @@ function applyStatusPayload(d) {
 
   if (d.accountId) {
     linkedinAccountDisplay.textContent = formatLinkedInAccountLine(d);
+    serviceAccountDisplay.textContent = `#${d.accountId}`;
     actionsSection.style.display = "block";
     registerHint.style.display = "none";
   } else {
     linkedinAccountDisplay.textContent = "—";
+    serviceAccountDisplay.textContent = "—";
+    lastSyncDisplay.textContent = "—";
     actionsSection.style.display = "none";
     registerHint.textContent =
       "Sign in to LinkedIn in this browser. The extension registers with your service automatically when you are logged in.";
     registerHint.style.display = "block";
+  }
+
+  if (d.accountId) {
+    if (d.lastSyncAt) {
+      const t = new Date(d.lastSyncAt);
+      const threads = d.lastSyncThreads ?? 0;
+      const msgs = d.lastSyncMessages ?? 0;
+      lastSyncDisplay.textContent = `${t.toLocaleString()} · ${threads} threads, ${msgs} new msgs`;
+    } else {
+      lastSyncDisplay.textContent = "Not synced yet";
+    }
   }
 
   statusBadge.innerHTML = statusToBadge(d.lastStatus);
@@ -105,7 +118,6 @@ async function loadStatus() {
   }
 }
 
-// ─── Save service URL ───────────────────────────────────────────────
 saveUrlBtn.addEventListener("click", async () => {
   const url = serviceUrlInput.value.trim().replace(/\/+$/, "");
   if (!url) {
@@ -126,7 +138,6 @@ saveUrlBtn.addEventListener("click", async () => {
   }
 });
 
-// ─── Sync ───────────────────────────────────────────────────────────
 syncBtn.addEventListener("click", async () => {
   syncBtn.disabled = true;
   syncBtn.textContent = "Syncing...";
@@ -146,7 +157,6 @@ syncBtn.addEventListener("click", async () => {
   }
 });
 
-// ─── Auth check ─────────────────────────────────────────────────────
 authCheckBtn.addEventListener("click", async () => {
   authCheckBtn.disabled = true;
   authCheckBtn.textContent = "Checking...";
@@ -168,5 +178,4 @@ authCheckBtn.addEventListener("click", async () => {
   }
 });
 
-// ─── Init ───────────────────────────────────────────────────────────
 loadStatus();

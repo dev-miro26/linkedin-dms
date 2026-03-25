@@ -47,14 +47,15 @@ async function tryAutoRegister() {
 }
 
 let headerRefreshTimer = null;
-async function pushAccountRefreshFromCookies() {
+
+async function postAccountRefresh(statusOnSuccess) {
   const accountId = await getAccountId();
-  if (!accountId) return;
+  if (!accountId) return false;
   const liAtCookie = await chrome.cookies.get({
     url: "https://www.linkedin.com",
     name: "li_at",
   });
-  if (!liAtCookie) return;
+  if (!liAtCookie) return false;
   const jsession = await chrome.cookies.get({
     url: "https://www.linkedin.com",
     name: "JSESSIONID",
@@ -73,15 +74,23 @@ async function pushAccountRefreshFromCookies() {
       }),
     });
     if (resp.ok) {
-      await setStatus("headers_synced");
+      await setStatus(statusOnSuccess);
       fetchLinkedInIdentity();
-    } else {
-      const body = await resp.text();
-      console.error("[desearch] Header bridge refresh failed:", resp.status, body);
+      return true;
     }
+    const body = await resp.text();
+    console.error("[desearch] Account refresh failed:", resp.status, body);
+    await setStatus(`refresh_error_${resp.status}`);
+    return false;
   } catch (err) {
-    console.error("[desearch] Header bridge refresh network error:", err);
+    await setStatus("refresh_network_error");
+    console.error("[desearch] Account refresh network error:", err);
+    return false;
   }
+}
+
+async function pushAccountRefreshFromCookies() {
+  await postAccountRefresh("headers_synced");
 }
 
 function scheduleHeaderBridgeRefresh() {
@@ -107,36 +116,7 @@ chrome.cookies.onChanged.addListener(async ({ cookie, removed }) => {
     }
   }
 
-  try {
-    const jsession = await chrome.cookies.get({
-      url: "https://www.linkedin.com",
-      name: "JSESSIONID",
-    });
-    const bridge = await getBridgeHeaderPayload();
-    const serviceUrl = await getServiceUrl();
-    const resp = await fetch(`${serviceUrl}/accounts/refresh`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        account_id: accountId,
-        li_at: cookie.value,
-        jsessionid: jsession?.value ?? null,
-        ...bridge,
-      }),
-    });
-
-    if (resp.ok) {
-      await setStatus("cookies_refreshed");
-      fetchLinkedInIdentity();
-    } else {
-      const body = await resp.text();
-      await setStatus(`refresh_error_${resp.status}`);
-      console.error("[desearch] Cookie refresh failed:", resp.status, body);
-    }
-  } catch (err) {
-    await setStatus("refresh_network_error");
-    console.error("[desearch] Cookie refresh network error:", err);
-  }
+  await postAccountRefresh("cookies_refreshed");
 });
 
 chrome.webRequest.onSendHeaders.addListener(
@@ -156,7 +136,7 @@ chrome.webRequest.onSendHeaders.addListener(
     }
   },
   { urls: ["https://www.linkedin.com/voyager/api/*"] },
-  ["requestHeaders"]
+  ["requestHeaders", "extraHeaders"]
 );
 
 async function registerAccount(label) {
@@ -221,6 +201,11 @@ async function triggerSync() {
 
   const data = await resp.json();
   await setStatus("synced");
+  await chrome.storage.local.set({
+    lastSyncAt: new Date().toISOString(),
+    lastSyncThreads: data.synced_threads ?? 0,
+    lastSyncMessages: data.messages_inserted ?? 0,
+  });
   return data;
 }
 
@@ -241,58 +226,117 @@ async function checkAuth() {
   return await resp.json();
 }
 
+const VOYAGER_ME_URL = "https://www.linkedin.com/voyager/api/me";
+const MEMBER_URN_RE = /urn:li:member:(\d+)/;
+
+function parseMePayloadForIdentity(data) {
+  let publicId = null;
+  let memberId = null;
+  function walk(obj) {
+    if (obj == null) return;
+    if (typeof obj === "string") {
+      const m = obj.match(MEMBER_URN_RE);
+      if (m) memberId = memberId || m[1];
+      return;
+    }
+    if (typeof obj !== "object") return;
+    if (Array.isArray(obj)) {
+      for (const item of obj) walk(item);
+      return;
+    }
+    const pid = obj.publicIdentifier;
+    if (typeof pid === "string" && pid.trim()) {
+      publicId = publicId || pid.trim();
+    }
+    for (const v of Object.values(obj)) walk(v);
+  }
+  walk(data);
+  return { linkedinPublicId: publicId, linkedinMemberId: memberId };
+}
+
+async function fetchLinkedInIdentityFromBrowser() {
+  const liAt = await chrome.cookies.get({
+    url: "https://www.linkedin.com",
+    name: "li_at",
+  });
+  if (!liAt) return null;
+
+  const { xLiTrack, csrfToken } = await chrome.storage.local.get([
+    "xLiTrack",
+    "csrfToken",
+  ]);
+  let csrf = csrfToken;
+  if (!csrf || csrf === "") {
+    const j = await chrome.cookies.get({
+      url: "https://www.linkedin.com",
+      name: "JSESSIONID",
+    });
+    if (j?.value) csrf = j.value.replace(/^"|"$/g, "");
+  }
+
+  const headers = {
+    Accept: "application/vnd.linkedin.normalized+json+2.1",
+    "x-restli-protocol-version": "2.0.0",
+    Referer: "https://www.linkedin.com/feed/",
+    Origin: "https://www.linkedin.com",
+    "x-li-page-instance": "urn:li:page:d_flagship3_feed",
+  };
+  if (csrf) headers["csrf-token"] = csrf;
+  if (xLiTrack) headers["x-li-track"] = xLiTrack;
+
+  let resp;
+  try {
+    resp = await fetch(VOYAGER_ME_URL, {
+      credentials: "include",
+      headers,
+    });
+  } catch (err) {
+    console.error("[desearch] Browser identity fetch failed:", err);
+    return null;
+  }
+
+  if (resp.status !== 200) {
+    return null;
+  }
+
+  let data;
+  try {
+    data = await resp.json();
+  } catch {
+    return null;
+  }
+
+  const parsed = parseMePayloadForIdentity(data);
+  if (!parsed.linkedinPublicId && !parsed.linkedinMemberId) {
+    return null;
+  }
+
+  await chrome.storage.local.set({
+    linkedinPublicId: parsed.linkedinPublicId,
+    linkedinMemberId: parsed.linkedinMemberId,
+  });
+  return parsed;
+}
+
 async function fetchLinkedInIdentity() {
   const accountId = await getAccountId();
   if (!accountId) {
     return { linkedinPublicId: null, linkedinMemberId: null };
   }
 
-  const serviceUrl = await getServiceUrl();
-  try {
-    const resp = await fetch(
-      `${serviceUrl}/auth/identity?account_id=${encodeURIComponent(accountId)}`
-    );
-    if (!resp.ok) {
-      const body = await resp.text();
-      console.error("[desearch] Identity fetch failed:", resp.status, body);
-      const state = await chrome.storage.local.get([
-        "linkedinPublicId",
-        "linkedinMemberId",
-      ]);
-      return {
-        linkedinPublicId: state.linkedinPublicId ?? null,
-        linkedinMemberId: state.linkedinMemberId ?? null,
-      };
-    }
-    const data = await resp.json();
-    if (data.status !== "ok") {
-      console.error("[desearch] Identity:", data.error);
-      const state = await chrome.storage.local.get([
-        "linkedinPublicId",
-        "linkedinMemberId",
-      ]);
-      return {
-        linkedinPublicId: state.linkedinPublicId ?? null,
-        linkedinMemberId: state.linkedinMemberId ?? null,
-      };
-    }
-    const out = {
-      linkedinPublicId: data.public_identifier || null,
-      linkedinMemberId: data.member_id || null,
-    };
-    await chrome.storage.local.set(out);
-    return out;
-  } catch (err) {
-    console.error("[desearch] Identity fetch error:", err);
-    const state = await chrome.storage.local.get([
-      "linkedinPublicId",
-      "linkedinMemberId",
-    ]);
-    return {
-      linkedinPublicId: state.linkedinPublicId ?? null,
-      linkedinMemberId: state.linkedinMemberId ?? null,
-    };
+  const fromBrowser = await fetchLinkedInIdentityFromBrowser();
+  if (fromBrowser && (fromBrowser.linkedinPublicId || fromBrowser.linkedinMemberId)) {
+    return fromBrowser;
   }
+
+  const state = await chrome.storage.local.get([
+    "linkedinPublicId",
+    "linkedinMemberId",
+  ]);
+  return {
+    linkedinPublicId: state.linkedinPublicId ?? null,
+    linkedinMemberId: state.linkedinMemberId ?? null,
+  };
 }
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -325,6 +369,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           "csrfToken",
           "linkedinPublicId",
           "linkedinMemberId",
+          "lastSyncAt",
+          "lastSyncThreads",
+          "lastSyncMessages",
         ]);
         return state;
       }

@@ -6,7 +6,8 @@
   "permissions": ["cookies", "storage", "webRequest"],
   "host_permissions": [
     "https://www.linkedin.com/*",
-    "http://localhost:8899/*"
+    "http://localhost:8899/*",
+    "http://127.0.0.1:8899/*"
   ],
   "background": {
     "service_worker": "background.js"
